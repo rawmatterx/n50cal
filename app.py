@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-# ─── POINT FUNCTIONS ──────────────────────────────────────────────────────
+# ╭──────────────────────── POINT FUNCTIONS ─────────────────────────────╮
 def classify_market_opening(prev_close, gift_val):
     if prev_close == 0: return "Data Error", 0
     pct = (gift_val - prev_close) / prev_close * 100
@@ -12,21 +12,22 @@ def classify_market_opening(prev_close, gift_val):
 def us_mkt_pts(pct):     return 1 if pct > 0.2 else -1 if pct < -0.2 else 0
 def india_vix_pts(v):    return -2 if v > 22 else 1 if 0 < v < 14 else 0
 def cboe_vix_pts(pct):   return -1 if pct > 7 else 1 if pct < -7 else 0
+
 def pcr_level_pts(x):
     if x > 1.7: return 1
     if 1.3 < x <= 1.7: return -1
     if 0.5 <= x < 0.7: return 1
     if x < 0.5: return -1
     return 0
-def pcr_change_pts(d):   return 1 if d > 0.10 else -1 if d < -0.10 else 0
-def max_pain_shift_pts(s): return 1 if s > 50 else -1 if s < -50 else 0
-def atm_iv_change_pts(p):  return -1 if p > 5 else 1 if p < -5 else 0
+def pcr_change_pts(d):      return 1 if d > 0.10 else -1 if d < -0.10 else 0
+def max_pain_shift_pts(s):  return 1 if s > 50 else -1 if s < -50 else 0
+def atm_iv_change_pts(p):   return -1 if p > 5 else 1 if p < -5 else 0
 def fii_dii_pts(net, *, is_fii=True):
     thr = 1000 if is_fii else 750
     return 1 if net > thr else -1 if net < -thr else 0
-def fx_pts(pct):         return -1 if pct > 0.25 else 1 if pct < -0.25 else 0
+def fx_pts(pct):            return -1 if pct > 0.25 else 1 if pct < -0.25 else 0
 
-# ─── AGGREGATION ──────────────────────────────────────────────────────────
+# ╭──────────────────────── AGGREGATION ─────────────────────────────────╮
 def aggregate_sentiment(score):
     if score >= 7:  return "Strongly Bullish"
     if score >= 3:  return "Mildly Bullish"
@@ -56,47 +57,104 @@ def build_report(tag_open, tag_sent, score, probs, factors,
     for k, v in factors.items():
         md += f"- {k}: {v:+}  \n"
     md += "\n**Special flags**  \n"
-    if hi_reward:  md += "✅ High‑Reward: DII buying with VIX > 22.\n"
-    if bear_trap:  md += "⚠️ Bear‑Trap: FII selling + PCR < 0.7.\n"
-    if oversold_risk: md += "🔄 Oversold‑bounce risk: PCR > 1.7 & VIX > 20.\n"
+    if hi_reward:      md += "✅ High‑Reward: DII buying with VIX > 22.\n"
+    if bear_trap:      md += "⚠️ Bear‑Trap: FII selling + PCR < 0.7.\n"
+    if oversold_risk:  md += "🔄 Oversold‑bounce risk: PCR > 1.7 & VIX > 20.\n"
     if not any([hi_reward, bear_trap, oversold_risk]): md += "None.\n"
     md += "\n---\n"
     return md
 
-# ─── UI ───────────────────────────────────────────────────────────────────
+# ╭──────────────────────── UI  &  INPUT GUIDE ───────────────────────────╮
 st.set_page_config(layout="wide")
-st.title("Nifty 50 Pre‑Market Sentiment Analyzer – Option‑Centric (Slimmed)")
+st.title("Nifty 50 Pre‑Market Sentiment Analyzer  —  Option‑Centric")
+
+with st.sidebar.expander("📘 Input Guide – Where & How to Fetch Each Field", expanded=False):
+    st.markdown("""
+**Index Levels**  
+- *Nifty Spot/Futures Close*: NSE EOD bhav‑copy.  
+- *GIFT Nifty (8 : 45 AM)*: SGX/GIFT web‑feed at 08:45 IST.
+
+**Global Cues**  
+- *Dow Jones & S&P 500 % Δ*: Overnight % change from major US indices (investing.com / Bloomberg).  
+- *CBOE VIX % Δ*: % change in the CBOE VIX versus its prior close.
+
+**Volatility / FX**  
+- *India VIX*: Previous day’s close from NSE.  
+- *USD/INR % Δ*: Spot % change since yesterday’s RBI reference close.
+
+**Institutional Flows**  
+- *FII / DII Net (₹ Cr)*: NSE provisional cash‑market data (BUY – SELL).
+
+**Options Metrics**  
+- *Nifty PCR (today)*: OI‑based PCR from broker analytics screens.  
+- *PCR Δ*: Today’s PCR minus yesterday’s PCR (e.g. +0.12).  
+- *Max‑Pain shift*: (Today’s max‑pain strike) – (Yesterday’s).  
+- *ATM IV % Δ*: ((Today’s ATM IV – Yesterday’s ATM IV) / Yesterday) × 100.
+
+👉 If any figure is unavailable, leave it at the default **0**; the model treats it as neutral.""")
 
 with st.form("sentiment"):
     st.subheader("Index levels")
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     with c1:
-        nifty_close = st.number_input("Nifty Spot – Prev Close", min_value=0.0, value=22000.0)
-        fut_close   = st.number_input("Nifty Futures – Prev Close", min_value=0.0, value=22050.0)
-        gift_now    = st.number_input("GIFT Nifty (8 : 45 AM)", min_value=0.0, value=22100.0)
+        nifty_close = st.number_input("Nifty Spot – Prev Close",
+                                      min_value=0.0, value=22000.0,
+                                      help="Use previous day’s spot close from NSE.")
+        fut_close   = st.number_input("Nifty Futures – Prev Close",
+                                      min_value=0.0, value=22050.0,
+                                      help="Prev day close of current‑month futures.")
+        gift_now    = st.number_input("GIFT Nifty (8 : 45 AM)",
+                                      min_value=0.0, value=22100.0,
+                                      help="Live value around 08:45 IST.")
     with c2:
-        dji  = st.number_input("Dow Jones % Δ (overnight)", value=0.10, format="%.2f")
-        spx  = st.number_input("S&P 500 % Δ (overnight)",   value=0.15, format="%.2f")
-        cboe = st.number_input("CBOE VIX % Δ (overnight)",  value=1.0,  format="%.2f")
-    with c3:
-        vix_india = st.number_input("India VIX (close)",     value=15.5, format="%.2f")
-        fx        = st.number_input("USD/INR % Δ",           value=0.05, format="%.2f")
+        dji  = st.number_input("Dow Jones  % Δ (overnight)",
+                               value=0.10, format="%.2f",
+                               help="(Today close ÷ Prev close – 1) × 100 for DJIA.")
+        spx  = st.number_input("S&P 500  % Δ (overnight)",
+                               value=0.15, format="%.2f",
+                               help="Same calc for S&P 500 index.")
+        cboe = st.number_input("CBOE VIX  % Δ (overnight)",
+                               value=1.00, format="%.2f",
+                               help="Percent change in CBOE VIX from prior close.")
 
-    st.subheader("Institutional & Derivatives")
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        fii = st.number_input("FII Net (₹ Cr)", value=500.0, format="%.0f")
-        dii = st.number_input("DII Net (₹ Cr)", value=300.0, format="%.0f")
-    with d2:
-        pcr_today  = st.number_input("Nifty PCR (today)", value=1.00, format="%.2f")
-        pcr_change = st.number_input("PCR Δ vs prev day", value=0.05, format="%.2f")
-    with d3:
-        maxpain_shift = st.number_input("Max‑Pain shift (pts)", value=0.0, format="%.0f")
-        iv_change     = st.number_input("ATM IV % Δ",           value=0.0, format="%.2f")
+    st.subheader("Volatility & FX")
+    v1, v2 = st.columns(2)
+    with v1:
+        vix_india = st.number_input("India VIX (close)",
+                                    value=15.5, format="%.2f",
+                                    help="Yesterday’s India VIX close.")
+    with v2:
+        fx   = st.number_input("USD/INR  % Δ",
+                               value=0.05, format="%.2f",
+                               help="Spot % change ‑ INR depreciation ⇒ positive value.")
+
+    st.subheader("Institutional & Option Metrics")
+    o1, o2, o3 = st.columns(3)
+    with o1:
+        fii = st.number_input("FII Net (₹ Cr)",
+                              value=500.0, format="%.0f",
+                              help="(+ve) net buy, (‑ve) net sell in cash market.")
+        dii = st.number_input("DII Net (₹ Cr)",
+                              value=300.0, format="%.0f",
+                              help="Domestic institutions net flow.")
+    with o2:
+        pcr_today  = st.number_input("Nifty PCR (today)",
+                                     value=1.00, format="%.2f",
+                                     help="Open‑interest based PCR at analysis time.")
+        pcr_change = st.number_input("PCR Δ vs prev day",
+                                     value=0.05, format="%.2f",
+                                     help="Today’s PCR minus yesterday’s PCR.")
+    with o3:
+        maxpain_shift = st.number_input("Max‑Pain shift (pts)",
+                                        value=0.0, format="%.0f",
+                                        help="Today max‑pain – yesterday max‑pain.")
+        iv_change     = st.number_input("ATM IV  % Δ",
+                                        value=0.0, format="%.2f",
+                                        help="ATM implied vol % change vs yesterday.")
 
     submitted = st.form_submit_button("Analyze")
 
-# ─── COMPUTE ──────────────────────────────────────────────────────────────
+# ╭──────────────────────── COMPUTE & REPORT ──────────────────────────────╮
 if submitted:
     pts_us  = us_mkt_pts(dji) + us_mkt_pts(spx)
     pts_tot = (
@@ -104,7 +162,7 @@ if submitted:
         india_vix_pts(vix_india) + cboe_vix_pts(cboe) +
         pcr_level_pts(pcr_today) + pcr_change_pts(pcr_change) +
         max_pain_shift_pts(maxpain_shift) + atm_iv_change_pts(iv_change) +
-        fii_dii_pts(fii, is_fii=True) + fii_dii_pts(dii, is_fii=False) +
+        fii_dii_pts(fii, True) + fii_dii_pts(dii, False) +
         fx_pts(fx)
     )
 
@@ -156,5 +214,5 @@ if submitted:
         st.markdown(build_report(fut_open, fut_sent, fut_score, fut_prob,
                                  fs_fut, hi_reward, bear_trap, oversold))
 
-    st.caption("Crude, Gold, Nikkei, Hang Seng and Nasdaq inputs removed per user request. All other thresholds unchanged.")
+    st.caption("Tooltips + sidebar guide added for every field. Leave any unknown input at 0 to treat it as neutral.")
 
